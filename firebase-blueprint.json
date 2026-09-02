@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "phoneNumber": { "type": "string", "description": "User phone number in E.164 format" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "photoURL": { "type": "string", "description": "Profile photo URL" },
+        "authProvider": { "type": "string", "description": "email | phone" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" },
+        "lastLoginAt": { "type": "string", "description": "ISO timestamp of latest login" },
+        "onboardingCompleted": { "type": "boolean", "description": "Whether the user completed onboarding" },
+        "experienceLevel": { "type": "string", "description": "beginner | intermediate | advanced" },
+        "city": { "type": "string", "description": "User city or region" }
+      }
+    },
+    "Space": {
+      "collection": "spaces",
+      "fields": {
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "name": { "type": "string", "description": "Space name" },
+        "type": { "type": "string", "description": "balcony | room | patio | windowsill" },
+        "usableAreaSqFt": { "type": "number", "description": "Usable square feet" },
+        "lengthFt": { "type": "number", "description": "Length in feet" },
+        "widthFt": { "type": "number", "description": "Width in feet" },
+        "zones": { "type": "array", "description": "Array of light/airflow zones" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      }
+    },
+    "PlantAdoption": {
+      "collection": "adoptions",
+      "fields": {
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "plantId": { "type": "string", "description": "Botanical species identifier" },
+        "nickname": { "type": "string", "description": "Given nickname" },
+        "zoneId": { "type": "string", "description": "Assigned zone ID" },
+        "adoptedAt": { "type": "string", "description": "ISO timestamp" },
+        "healthStatus": { "type": "string", "description": "thriving | healthy | needs-attention" },
+        "streakDays": { "type": "number", "description": "Care streak days" }
+      }
+    },
+    "CareTask": {
+      "collection": "care_tasks",
+      "fields": {
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "adoptionId": { "type": "string", "description": "Associated plant adoption ID" },
+        "title": { "type": "string", "description": "Task title" },
+        "type": { "type": "string", "description": "water | mist | rotate | fertilize | inspect" },
+        "dueDate": { "type": "string", "description": "Due date" },
+        "isCompleted": { "type": "boolean", "description": "Completion state" }
+      }
+    },
+    "HealthObservation": {
+      "collection": "health_observations",
+      "fields": {
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "adoptionId": { "type": "string", "description": "Plant adoption ID" },
+        "plantName": { "type": "string", "description": "Plant nickname or common name" },
+        "timestamp": { "type": "string", "description": "Observation timestamp" },
+        "overallCondition": { "type": "string", "description": "healthy | mild_stress | severe_stress" },
+        "diagnosis": { "type": "string", "description": "Primary diagnosis" },
+        "confidenceScore": { "type": "number", "description": "Diagnostic confidence 0-100" }
+      }
+    },
+    "RewardTransaction": {
+      "collection": "reward_transactions",
+      "fields": {
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "actionType": { "type": "string", "description": "water_logged | space_mapped | streak_milestone | reward_redeemed" },
+        "points": { "type": "number", "description": "Signed point delta" },
+        "timestamp": { "type": "string", "description": "Transaction timestamp" },
+        "verified": { "type": "boolean", "description": "Validation flag" }
+      }
+    }
+  }
+}

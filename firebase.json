@@ -1,0 +1,8 @@
+{
+  "firestore": {
+    "databaseId": "ai-studio-littlestep-0db8fc65-cf8d-4e42-a288-13a2828c5f75",
+    "rules": "firestore.rules",
+    "edition": "ENTERPRISE",
+    "dataAccessMode": "FIRESTORE_NATIVE"
+  }
+}
