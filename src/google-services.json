@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "461161002395",
+    "project_id": "gen-lang-client-0222003829",
+    "storage_bucket": "gen-lang-client-0222003829.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:461161002395:android:beae57920c9a6b222ddd3e",
+        "android_client_info": {
+          "package_name": "com.LittleStep"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "461161002395-o1jh489n7b6rcjahipma09ej1agqbm79.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB11LNUS3aKhg1n86Ef3R-0PEiMoHQ4rZQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "461161002395-o1jh489n7b6rcjahipma09ej1agqbm79.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

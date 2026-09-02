@@ -701,6 +701,18 @@ export const AuthModal: React.FC = () => {
             {/* EMAIL METHOD */}
             {authMethod === 'email' && (
               <form onSubmit={handleEmailSubmit} className="space-y-4">
+                {authModalMode === 'login' ? (
+                  <div className="p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30 text-xs text-slate-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Enter your registered <strong>Email</strong> and <strong>Password</strong> to sign in.</span>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30 text-xs text-slate-300 flex items-center gap-2">
+                    <UserIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Create your new account with an email & password (at least 6 characters).</span>
+                  </div>
+                )}
+
                 {authModalMode === 'register' && (
                   <div className="space-y-1.5">
                     <label
