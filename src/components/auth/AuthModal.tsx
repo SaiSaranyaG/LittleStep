@@ -344,11 +344,14 @@ export const AuthModal: React.FC = () => {
 
       const result = await sendPhoneOtp(fullPhoneNumber, verifier);
       if (result) {
-        setOtp('');
+        setOtp(result.devOtpCode || '');
+        const devMsg = result.devOtpCode ? ` [Code: ${result.devOtpCode}]` : '';
         triggerPopMessage(
           'success',
-          'Verification Code Dispatched! 📱',
-          `A 6-digit SMS verification code has been dispatched to ${selectedCountryCode} ${digitsOnly}. Please enter the code below.`
+          `Verification Code Generated! 📱${devMsg}`,
+          result.devOtpCode
+            ? `Your 6-digit verification code is: ${result.devOtpCode}. It has been auto-filled below. Click Verify Code to log in!`
+            : `A 6-digit SMS verification code has been dispatched to ${selectedCountryCode} ${digitsOnly}. Please enter the code below.`
         );
       }
     } catch (err: any) {

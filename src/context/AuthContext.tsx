@@ -496,6 +496,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Create a compatible confirmation result object
       const fallbackResult = {
+        devOtpCode: data.devOtpCode,
         confirm: async (code: string) => {
           const ok = await verifyPhoneOtp(code);
           if (!ok) {
