@@ -150,7 +150,38 @@ export const AuthModal: React.FC = () => {
   // Sync auth context errors to pop message
   useEffect(() => {
     if (authError) {
-      if (authError.toLowerCase().includes('already exists') || authError.toLowerCase().includes('in use')) {
+      if (
+        authError.toLowerCase().includes('no account exists') ||
+        authError.toLowerCase().includes('create an account') ||
+        authError.toLowerCase().includes('user-not-found')
+      ) {
+        triggerPopMessage(
+          'warning',
+          'Account Not Found ⚠️',
+          authError,
+          'Create Account Now',
+          () => {
+            setAuthModalMode('register');
+            clearAuthError();
+            dismissPopMessage();
+          }
+        );
+      } else if (
+        authError.toLowerCase().includes('incorrect password') ||
+        authError.toLowerCase().includes('wrong-password')
+      ) {
+        triggerPopMessage(
+          'error',
+          'Incorrect Password ❌',
+          authError,
+          'Forgot Password?',
+          () => {
+            setIsResetMode(true);
+            clearAuthError();
+            dismissPopMessage();
+          }
+        );
+      } else if (authError.toLowerCase().includes('already exists') || authError.toLowerCase().includes('in use')) {
         triggerPopMessage(
           'error',
           'Account Already Exists',

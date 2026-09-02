@@ -94,10 +94,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Helper to convert Firebase error codes to warm, user-friendly messages
 export function getFriendlyAuthErrorMessage(errorCode: string): string {
   switch (errorCode) {
-    case 'auth/invalid-credential':
     case 'auth/user-not-found':
+      return 'No account exists with this email address. Please create an account to get started.';
     case 'auth/wrong-password':
-      return 'The email or password you entered is incorrect. Please check and try again.';
+      return 'Incorrect password. Please check your password and try again, or reset it if forgotten.';
+    case 'auth/invalid-credential':
+      return 'Incorrect email or password. If you do not have an account yet, please create an account.';
     case 'auth/email-already-in-use':
       return 'An account with this email already exists. Please sign in instead.';
     case 'auth/weak-password':
