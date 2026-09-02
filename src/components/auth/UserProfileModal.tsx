@@ -22,7 +22,7 @@ interface UserProfileModalProps {
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onClose }) => {
-  const { user, userProfile, updateUserProfileData, logout, deleteAccount } = useAuth();
+  const { user, userProfile, updateUserProfileData, logout, deleteAccount, authError } = useAuth();
   const { totalPoints, currentLevel } = useApp();
 
   const [displayName, setDisplayName] = useState(userProfile?.displayName || user?.displayName || '');
@@ -62,7 +62,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
     if (success) {
       onClose();
     } else {
-      setDeleteError('Could not delete account. If you logged in a while ago, please log out and log back in before deleting.');
+      setDeleteError(authError || 'Could not delete account. If you logged in a while ago, please log out and log back in before deleting.');
     }
   };
 

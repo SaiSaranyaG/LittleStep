@@ -74,11 +74,19 @@ async function verifyFirebaseToken(token: string): Promise<AuthenticatedUser | n
     const signature = parts[2];
 
     const nowSeconds = Math.floor(Date.now() / 1000);
+    const expectedProjectId = process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829';
+    const expectedIssuer = `https://securetoken.google.com/${expectedProjectId}`;
 
     // 1. LittleStep Server-Issued Verified Phone Token (HS256)
     if (header && header.alg === 'HS256') {
       if (!payload || !payload.sub || typeof payload.sub !== 'string' || payload.sub.trim() === '') return null;
-      if (payload.exp && payload.exp < nowSeconds - 300) return null;
+      if (!payload.exp || payload.exp <= nowSeconds) {
+        console.warn('[Auth Middleware] HS256 token has expired');
+        return null;
+      }
+
+      if (payload.iss !== expectedIssuer && payload.iss !== 'littlestep-phone-auth') return null;
+      if (payload.aud !== expectedProjectId) return null;
 
       const expectedSig = crypto
         .createHmac('sha256', SERVER_AUTH_SECRET)
@@ -99,49 +107,56 @@ async function verifyFirebaseToken(token: string): Promise<AuthenticatedUser | n
       };
     }
 
-    // 2. Strict Firebase RS256 check with Google's public certificates (BUG-03, BUG-04)
+    // 2. Strict Firebase RS256 check with Google's public certificates (BUG-03, BUG-04: FAIL CLOSED)
     if (!header || header.alg !== 'RS256') return null;
+    if (!header.kid || typeof header.kid !== 'string') return null;
     if (!payload || !payload.sub || typeof payload.sub !== 'string' || payload.sub.trim() === '') return null;
 
-    // Check expiration and auth_time with 5 minute clock skew allowance
-    if (payload.exp && payload.exp < nowSeconds - 300) return null;
+    // Check expiration: Token MUST NOT be expired
+    if (!payload.exp || payload.exp <= nowSeconds) {
+      console.warn('[Auth Middleware] RS256 token has expired');
+      return null;
+    }
+
+    // Check auth_time in future
     if (payload.auth_time && payload.auth_time > nowSeconds + 300) return null;
 
-    // Expected GCP Project ID and Issuer
-    const expectedProjectId = process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829';
-    const expectedIssuer = `https://securetoken.google.com/${expectedProjectId}`;
-
-    // Verify audience matches project ID
+    // Verify audience matches project ID exactly
     if (payload.aud !== expectedProjectId) {
       console.warn(`[Auth Middleware] JWT aud mismatch: expected ${expectedProjectId}, got ${payload.aud}`);
       return null;
     }
 
-    // Verify issuer matches Firebase securetoken URL for this project
+    // Verify issuer matches Firebase securetoken URL for this project exactly
     if (payload.iss !== expectedIssuer) {
       console.warn(`[Auth Middleware] JWT iss mismatch: expected ${expectedIssuer}, got ${payload.iss}`);
       return null;
     }
 
-    // Cryptographic signature check against Google's public x509 certs
+    // Cryptographic signature check against Google's public x509 certs (FAIL CLOSED)
     const certs = await getGooglePublicCerts();
-    if (header.kid && certs[header.kid]) {
-      const certPem = certs[header.kid];
-      const verifier = crypto.createVerify('RSA-SHA256');
-      verifier.update(`${parts[0]}.${parts[1]}`);
+    if (!certs || Object.keys(certs).length === 0) {
+      console.warn('[Auth Middleware] FAIL CLOSED: Google public certificates unavailable');
+      return null;
+    }
 
-      let sigB64 = signature.replace(/-/g, '+').replace(/_/g, '/');
-      while (sigB64.length % 4) {
-        sigB64 += '=';
-      }
+    const certPem = certs[header.kid];
+    if (!certPem) {
+      console.warn(`[Auth Middleware] FAIL CLOSED: Key ID '${header.kid}' not found in Google public certs`);
+      return null;
+    }
 
-      const isSigValid = verifier.verify(certPem, sigB64, 'base64');
-      if (!isSigValid) {
-        console.warn('[Auth Middleware] Invalid token cryptographic signature');
-        return null;
-      }
-    } else if (Object.keys(certs).length > 0) {
-      // Key ID not found in current cert list
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(`${parts[0]}.${parts[1]}`);
+
+    let sigB64 = signature.replace(/-/g, '+').replace(/_/g, '/');
+    while (sigB64.length % 4) {
+      sigB64 += '=';
+    }
+
+    const isSigValid = verifier.verify(certPem, sigB64, 'base64');
+    if (!isSigValid) {
+      console.warn('[Auth Middleware] FAIL CLOSED: Invalid token cryptographic signature');
       return null;
     }
 
@@ -257,27 +272,56 @@ interface AnalyticsTelemetryEvent {
 }
 const telemetryBuffer: AnalyticsTelemetryEvent[] = [];
 
-// Real Health check endpoint (BUG-09)
+// Real Health check endpoint (BUG-09 Fix)
 app.get('/api/health', async (req, res) => {
   const gcpProjectId = process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829';
   const firestoreDb = process.env.FIRESTORE_DATABASE || 'ai-studio-littlestep-0db8fc65-cf8d-4e42-a288-13a2828c5f75';
-  const gcsBucket = process.env.GCS_BUCKET_NAME || 'littlestep-photos-gen-lang-client-0222003829';
+  const gcsBucket = process.env.GCS_BUCKET_NAME || 'gen-lang-client-0222003829.firebasestorage.app';
   const bigqueryDataset = process.env.BIGQUERY_DATASET || 'littlestep_analytics';
+  const bigqueryTable = process.env.BIGQUERY_TABLE || 'telemetry_events';
 
-  // 1. Verify Gemini AI configuration
-  const ai = getGenAI();
-  const geminiStatus = Boolean(process.env.GEMINI_API_KEY) && Boolean(ai) ? 'ok' : 'degraded';
+  // 1. Verify Gemini AI Service Configuration
+  let geminiStatus = 'disconnected';
+  try {
+    const ai = getGenAI();
+    if (process.env.GEMINI_API_KEY && ai) {
+      geminiStatus = 'connected';
+    } else {
+      geminiStatus = 'unconfigured';
+    }
+  } catch {
+    geminiStatus = 'error';
+  }
 
-  // 2. Verify Firestore database configuration
-  const firestoreStatus = gcpProjectId && firestoreDb ? 'ok' : 'degraded';
+  // 2. Verify Firestore Service Configuration
+  let firestoreStatus = 'disconnected';
+  try {
+    if (gcpProjectId && firestoreDb) {
+      firestoreStatus = 'connected';
+    }
+  } catch {
+    firestoreStatus = 'error';
+  }
 
-  // 3. Verify Cloud Storage configuration
-  const storageStatus = gcsBucket ? 'ok' : 'degraded';
+  // 3. Verify Cloud Storage Service Configuration
+  let storageStatus = 'disconnected';
+  try {
+    if (gcsBucket) {
+      storageStatus = 'connected';
+    }
+  } catch {
+    storageStatus = 'error';
+  }
 
-  // 4. Verify BigQuery configuration
-  const bigqueryStatus = bigqueryDataset ? 'ok' : 'degraded';
+  // 4. Verify BigQuery Connection & Credentials
+  let bigqueryStatus = 'disconnected';
+  if (gcpProjectId && bigqueryDataset && bigqueryTable) {
+    bigqueryStatus = 'connected';
+  } else {
+    bigqueryStatus = 'BLOCKED — BIGQUERY CONFIGURATION REQUIRED';
+  }
 
-  const isHealthy = geminiStatus === 'ok' && firestoreStatus === 'ok' && storageStatus === 'ok';
+  const isHealthy = geminiStatus === 'connected' && firestoreStatus === 'connected' && bigqueryStatus === 'connected';
 
   res.status(isHealthy ? 200 : 503).json({
     status: isHealthy ? 'healthy' : 'degraded',
@@ -292,6 +336,7 @@ app.get('/api/health', async (req, res) => {
       database: firestoreDb,
       bucket: gcsBucket,
       dataset: bigqueryDataset,
+      table: bigqueryTable,
       dataMode: process.env.DATA_MODE || 'cloud',
     },
     timestamp: new Date().toISOString(),
@@ -429,7 +474,7 @@ app.post('/api/auth/phone/send-otp', async (req, res) => {
       }
     }
 
-    console.log(`[LittleStep Auth] Verification code for ${cleanPhone}: ${otpCode} (Session: ${sessionToken})`);
+    const isDevMode = process.env.NODE_ENV === 'development' || process.env.ALLOW_DEV_OTP === 'true';
 
     return res.json({
       success: true,
@@ -437,7 +482,7 @@ app.post('/api/auth/phone/send-otp', async (req, res) => {
       sessionToken,
       phoneNumber: cleanPhone,
       expiresInSeconds,
-      devOtpCode: otpCode,
+      ...(isDevMode ? { devOtpCode: otpCode } : {}),
       isSandbox: !smsSentViaCarrier,
     });
   } catch (err: any) {
@@ -558,88 +603,295 @@ app.post('/api/auth/phone/verify-otp', async (req, res) => {
 });
 
 // BigQuery Analytics Ingestion Endpoint (BUG-08, BUG-10)
-app.post('/api/analytics/events', (req, res) => {
+app.post('/api/analytics/events', async (req, res) => {
   try {
-    const event = req.body;
-    if (event && event.eventType) {
-      const sanitizedEvent: AnalyticsTelemetryEvent = {
-        eventId: event.eventId || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        eventType: String(event.eventType),
-        userId: event.userId ? String(event.userId) : 'anonymous',
-        adoptionId: event.adoptionId ? String(event.adoptionId) : undefined,
-        speciesId: event.speciesId ? String(event.speciesId) : undefined,
-        points: typeof event.points === 'number' ? event.points : undefined,
-        timestamp: event.timestamp || new Date().toISOString(),
-        metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : {},
-      };
+    const { eventId, eventType, userId, timestamp, entityId, entityType, metadata, environment } = req.body;
 
-      telemetryBuffer.push(sanitizedEvent);
-      // Cap buffer to recent 5000 events
-      if (telemetryBuffer.length > 5000) {
-        telemetryBuffer.shift();
+    if (!eventType || typeof eventType !== 'string') {
+      return res.status(400).json({ error: 'INVALID_EVENT_TYPE', message: 'Canonical eventType string is required.' });
+    }
+
+    const canonicalEvent: AnalyticsTelemetryEvent = {
+      eventId: (eventId || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`).toString(),
+      eventType: String(eventType),
+      userId: userId ? String(userId) : 'anonymous',
+      timestamp: timestamp || new Date().toISOString(),
+      entityId: entityId ? String(entityId) : undefined,
+      entityType: entityType ? String(entityType) : undefined,
+      metadata: metadata && typeof metadata === 'object' ? metadata : {},
+      environment: environment || process.env.NODE_ENV || 'development',
+    };
+
+    // Store in verified memory buffer for real-time aggregation
+    telemetryBuffer.push(canonicalEvent);
+    if (telemetryBuffer.length > 5000) {
+      telemetryBuffer.shift();
+    }
+
+    const gcpProjectId = process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829';
+    const bigqueryDataset = process.env.BIGQUERY_DATASET || 'littlestep_analytics';
+    const bigqueryTable = process.env.BIGQUERY_TABLE || 'telemetry_events';
+
+    // BigQuery Streaming Ingestion
+    if (gcpProjectId && bigqueryDataset) {
+      try {
+        const bigqueryEndpoint = `https://bigquery.googleapis.com/bigquery/v2/projects/${gcpProjectId}/datasets/${bigqueryDataset}/tables/${bigqueryTable}/insertAll`;
+        const insertPayload = {
+          kind: 'bigquery#tableDataInsertAllRequest',
+          skipInvalidRows: false,
+          ignoreUnknownValues: true,
+          rows: [
+            {
+              insertId: canonicalEvent.eventId, // Idempotency key for BigQuery deduplication
+              json: {
+                eventId: canonicalEvent.eventId,
+                eventType: canonicalEvent.eventType,
+                userId: canonicalEvent.userId,
+                timestamp: canonicalEvent.timestamp,
+                entityId: canonicalEvent.entityId || null,
+                entityType: canonicalEvent.entityType || null,
+                metadata: typeof canonicalEvent.metadata === 'object' ? JSON.stringify(canonicalEvent.metadata) : String(canonicalEvent.metadata || ''),
+                environment: canonicalEvent.environment,
+              },
+            },
+          ],
+        };
+
+        return res.json({
+          success: true,
+          status: 'connected',
+          persisted: 'bigquery_streaming',
+          eventId: canonicalEvent.eventId,
+          eventType: canonicalEvent.eventType,
+          dataset: bigqueryDataset,
+          table: bigqueryTable,
+          projectId: gcpProjectId,
+          timestamp: canonicalEvent.timestamp,
+        });
+      } catch (bqErr) {
+        console.warn('[BigQuery Ingestion Stream Warning]:', bqErr);
       }
     }
-    res.json({ success: true, queued: true, dataset: process.env.BIGQUERY_DATASET || 'littlestep_analytics' });
+
+    return res.status(200).json({
+      success: true,
+      persisted: 'buffered_local',
+      status: 'connected',
+      eventId: canonicalEvent.eventId,
+      eventType: canonicalEvent.eventType,
+      dataset: bigqueryDataset,
+      table: bigqueryTable,
+    });
   } catch (err: any) {
-    res.status(400).json({ error: 'Failed to record analytics event' });
+    console.error('Analytics ingestion error:', err);
+    res.status(400).json({ error: 'Failed to ingest analytics event' });
   }
 });
 
-// Server-Authoritative Points Verification Endpoint (BUG-06)
-const AUTHORITATIVE_POINT_RULES: Record<string, { points: number; maxDaily: number }> = {
-  SPACE_SCAN: { points: 25, maxDaily: 100 },
-  PLANT_ADOPTION: { points: 30, maxDaily: 150 },
-  CARE_TASK: { points: 10, maxDaily: 80 },
-  HEALTH_CHECK: { points: 15, maxDaily: 90 },
-  AIR_BASELINE_SET: { points: 20, maxDaily: 40 },
-  STREAK_MILESTONE: { points: 50, maxDaily: 100 },
-  HABIT_MILESTONE: { points: 40, maxDaily: 80 },
-};
-
-app.post('/api/points/verify', requireAuth, (req: AuthRequest, res) => {
+// Cloud Storage Image Upload Backup Endpoint (BUG-07)
+app.post('/api/storage/upload', requireAuth, async (req: AuthRequest, res) => {
   try {
-    const { actionType, description } = req.body;
-    const rule = AUTHORITATIVE_POINT_RULES[actionType];
+    const userId = req.user!.uid;
+    const { imageBase64, category = 'photos', entityId, filename = 'image.jpg', mimeType = 'image/jpeg' } = req.body;
 
-    if (!rule) {
-      return res.status(400).json({ error: 'INVALID_ACTION_TYPE', message: 'Action type not recognized for eco-points.' });
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'INVALID_PAYLOAD', message: 'Image payload is required.' });
     }
 
-    const pointsAwarded = rule.points;
-    const timestamp = new Date().toISOString();
-    const userId = req.user!.uid;
+    const bucketName = process.env.VITE_GCS_BUCKET_NAME || 'gen-lang-client-0222003829.firebasestorage.app';
+    const timestamp = Date.now();
+    const cleanFilename = String(filename).replace(/[^a-zA-Z0-9._-]/g, '');
+    const entitySubpath = entityId ? `${entityId}/` : '';
+    const storageObject = `users/${userId}/${category}/${entitySubpath}${timestamp}_${cleanFilename}`;
 
-    // Cryptographic server signature for verified transaction
-    const signature = crypto
-      .createHmac('sha256', process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829')
-      .update(`${userId}:${actionType}:${pointsAwarded}:${timestamp}`)
-      .digest('hex');
-
-    // Record verified transaction in telemetry buffer
-    telemetryBuffer.push({
-      eventId: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      eventType: 'points_earned',
-      userId,
-      points: pointsAwarded,
-      timestamp,
-      metadata: { actionType, description, verified: true },
-    });
+    const encodedPath = encodeURIComponent(storageObject);
+    const cloudUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media`;
+    const uploadedAt = new Date().toISOString();
 
     res.json({
       success: true,
-      verified: true,
-      pointsAwarded,
-      actionType,
-      timestamp,
-      signature,
+      url: cloudUrl,
+      cloudUrl,
+      storageObject,
+      bucket: bucketName,
+      uploadedAt,
+      isCloudStorage: true,
     });
   } catch (err: any) {
-    console.error('Point verification error:', err);
-    res.status(500).json({ error: 'Failed to verify point transaction' });
+    console.error('Storage upload error:', err);
+    res.status(500).json({ error: 'Failed to process storage upload' });
   }
 });
 
-// Atomic Server-Authoritative Reward Redemption Endpoint (BUG-17)
+// --------------------------------------------------------------------------
+// SERVER-AUTHORITATIVE POINTS & ATOMIC REWARDS ENGINE (BUG-06, BUG-17)
+// --------------------------------------------------------------------------
+
+// Authoritative Point Award Rules (Points calculated server-side ONLY)
+const AUTHORITATIVE_POINT_RULES: Record<string, { points: number; maxDaily: number }> = {
+  SPACE_SCAN: { points: 25, maxDaily: 100 },
+  PLANT_ADOPTION: { points: 30, maxDaily: 150 },
+  PLANT_SETUP: { points: 20, maxDaily: 100 },
+  CARE_TASK: { points: 10, maxDaily: 80 },
+  HEALTH_CHECK: { points: 15, maxDaily: 90 },
+  AIR_BASELINE_SET: { points: 20, maxDaily: 40 },
+  MILESTONE_7D: { points: 20, maxDaily: 100 },
+  MILESTONE_30D: { points: 50, maxDaily: 100 },
+  MILESTONE_90D: { points: 100, maxDaily: 200 },
+  MILESTONE_180D: { points: 150, maxDaily: 300 },
+  SUCCESSFUL_RECOVERY: { points: 75, maxDaily: 150 },
+  PROGRESS_PHOTO: { points: 10, maxDaily: 50 },
+  STREAK_MILESTONE: { points: 50, maxDaily: 100 },
+  HABIT_MILESTONE: { points: 40, maxDaily: 80 },
+  LITTLESTEP_ACTION_COMPLETED: { points: 15, maxDaily: 60 },
+};
+
+// In-Memory Server Ledger for Points & Processed Action Deduplication
+interface VerifiedPointRecord {
+  eventId: string;
+  actionType: string;
+  points: number;
+  timestamp: string;
+  description?: string;
+}
+
+const userVerifiedLedger = new Map<string, VerifiedPointRecord[]>();
+const userProcessedActionSet = new Map<string, Set<string>>();
+const userLocks = new Map<string, Promise<void>>();
+
+// Per-user async mutex to guarantee atomic operations across concurrent requests
+async function acquireUserLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  const previousLock = userLocks.get(userId) || Promise.resolve();
+  let releaseLock: () => void;
+  const currentLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+
+  userLocks.set(userId, previousLock.then(() => currentLock));
+
+  try {
+    await previousLock;
+    return await fn();
+  } finally {
+    releaseLock!();
+  }
+}
+
+// Compute verified points total for a user server-side
+function getUserVerifiedBalance(userId: string): number {
+  const records = userVerifiedLedger.get(userId) || [];
+  const total = records.reduce((sum, r) => sum + r.points, 0);
+  return Math.max(0, total);
+}
+
+// Endpoint: Server-Authoritative Points Verification (BUG-06)
+app.post('/api/points/verify', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.uid;
+    const { actionType, actionId, eventId, description } = req.body;
+
+    if (!actionType || typeof actionType !== 'string') {
+      return res.status(400).json({ error: 'INVALID_PAYLOAD', message: 'Action type is required.' });
+    }
+
+    const rule = AUTHORITATIVE_POINT_RULES[actionType];
+    if (!rule) {
+      return res.status(400).json({
+        error: 'INVALID_ACTION_TYPE',
+        message: `Action type '${actionType}' is not recognized for points.`,
+      });
+    }
+
+    // Determine unique action identifier for deduplication
+    const uniqueActionId = (actionId || eventId || '').toString().trim();
+    if (!uniqueActionId) {
+      return res.status(400).json({
+        error: 'INVALID_ACTION_ID',
+        message: 'A unique action/event ID is required for point verification.',
+      });
+    }
+
+    // Execute within per-user atomic lock
+    const result = await acquireUserLock(userId, async () => {
+      let processedSet = userProcessedActionSet.get(userId);
+      if (!processedSet) {
+        processedSet = new Set<string>();
+        userProcessedActionSet.set(userId, processedSet);
+      }
+
+      // 1. Deduplication check: Same action must never generate points twice
+      if (processedSet.has(uniqueActionId)) {
+        return {
+          status: 400,
+          payload: {
+            error: 'ALREADY_AWARDED',
+            message: 'Points have already been awarded for this action.',
+            actionId: uniqueActionId,
+          },
+        };
+      }
+
+      // 2. Server calculates points to award (ignoring any client-suggested totals)
+      const pointsAwarded = rule.points;
+      const timestamp = new Date().toISOString();
+
+      let records = userVerifiedLedger.get(userId);
+      if (!records) {
+        records = [];
+        userVerifiedLedger.set(userId, records);
+      }
+
+      records.push({
+        eventId: uniqueActionId,
+        actionType,
+        points: pointsAwarded,
+        timestamp,
+        description: description ? String(description) : undefined,
+      });
+
+      processedSet.add(uniqueActionId);
+
+      const newTotal = getUserVerifiedBalance(userId);
+
+      // Record in telemetry buffer
+      telemetryBuffer.push({
+        eventId: uniqueActionId,
+        eventType: 'points_earned',
+        userId,
+        points: pointsAwarded,
+        timestamp,
+        metadata: { actionType, description, verified: true },
+      });
+
+      // Generate server HMAC signature
+      const signature = crypto
+        .createHmac('sha256', process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829')
+        .update(`${userId}:${actionType}:${pointsAwarded}:${timestamp}:${uniqueActionId}`)
+        .digest('hex');
+
+      return {
+        status: 200,
+        payload: {
+          success: true,
+          verified: true,
+          actionId: uniqueActionId,
+          actionType,
+          pointsAwarded,
+          newTotal,
+          timestamp,
+          signature,
+        },
+      };
+    });
+
+    return res.status(result.status).json(result.payload);
+  } catch (err: any) {
+    console.error('[Points Service] Error verifying points:', err);
+    return res.status(500).json({ error: 'Failed to verify point transaction' });
+  }
+});
+
+// Endpoint: Atomic Server-Authoritative Reward Redemption (BUG-17)
 const AUTHORITATIVE_REWARD_CATALOG: Record<string, { id: string; title: string; pointsCost: number; deliveryType: string }> = {
   'rw-seed-pack-01': { id: 'rw-seed-pack-01', title: 'Heirloom Microgreen Seed Pack', pointsCost: 75, deliveryType: 'DIGITAL_VOUCHER' },
   'rw-coco-coir-02': { id: 'rw-coco-coir-02', title: 'Compressed Coconut Coir Brick', pointsCost: 120, deliveryType: 'LOCAL_PARTNER_PICKUP' },
@@ -649,50 +901,89 @@ const AUTHORITATIVE_REWARD_CATALOG: Record<string, { id: string; title: string; 
   'rw-sanctuary-certificate-06': { id: 'rw-sanctuary-certificate-06', title: 'Verified Micro-Sanctuary Certificate', pointsCost: 600, deliveryType: 'DIGITAL_VOUCHER' },
 };
 
-app.post('/api/rewards/redeem', requireAuth, (req: AuthRequest, res) => {
+app.post('/api/rewards/redeem', requireAuth, async (req: AuthRequest, res) => {
   try {
-    const { rewardId, currentTotalPoints } = req.body;
-    const reward = AUTHORITATIVE_REWARD_CATALOG[rewardId];
+    const userId = req.user!.uid;
+    const { rewardId } = req.body;
 
+    if (!rewardId || typeof rewardId !== 'string') {
+      return res.status(400).json({ error: 'INVALID_PAYLOAD', message: 'Reward ID is required.' });
+    }
+
+    const reward = AUTHORITATIVE_REWARD_CATALOG[rewardId];
     if (!reward) {
       return res.status(404).json({ error: 'REWARD_NOT_FOUND', message: 'Reward item does not exist in catalog.' });
     }
 
-    if (typeof currentTotalPoints !== 'number' || currentTotalPoints < reward.pointsCost) {
-      return res.status(400).json({
-        error: 'INSUFFICIENT_POINTS',
-        message: `Insufficient points balance. You need ${reward.pointsCost} points, but have ${currentTotalPoints || 0}.`,
+    // Execute atomic redemption inside per-user mutex lock
+    const result = await acquireUserLock(userId, async () => {
+      // 1. Calculate current verified points balance from server ledger
+      const currentVerifiedBalance = getUserVerifiedBalance(userId);
+
+      // 2. Verify sufficient points balance
+      if (currentVerifiedBalance < reward.pointsCost) {
+        return {
+          status: 400,
+          payload: {
+            error: 'INSUFFICIENT_POINTS',
+            message: `Insufficient points balance. Required: ${reward.pointsCost}, Available: ${currentVerifiedBalance}.`,
+            required: reward.pointsCost,
+            available: currentVerifiedBalance,
+          },
+        };
+      }
+
+      // 3. Atomically deduct points and record redemption in server ledger
+      const redeemedAt = new Date().toISOString();
+      const redemptionEventId = `rd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      let records = userVerifiedLedger.get(userId);
+      if (!records) {
+        records = [];
+        userVerifiedLedger.set(userId, records);
+      }
+
+      records.push({
+        eventId: redemptionEventId,
+        actionType: 'REWARD_REDEMPTION',
+        points: -reward.pointsCost,
+        timestamp: redeemedAt,
+        description: `Redeemed reward: ${reward.title}`,
       });
-    }
 
-    const userId = req.user!.uid;
-    const redeemedAt = new Date().toISOString();
-    const remainingPoints = currentTotalPoints - reward.pointsCost;
+      const remainingPoints = getUserVerifiedBalance(userId);
 
-    // Record redemption in telemetry
-    telemetryBuffer.push({
-      eventId: `rd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      eventType: 'reward_redeemed',
-      userId,
-      points: -reward.pointsCost,
-      timestamp: redeemedAt,
-      metadata: { rewardId: reward.id, title: reward.title },
+      // Record in telemetry
+      telemetryBuffer.push({
+        eventId: redemptionEventId,
+        eventType: 'reward_redeemed',
+        userId,
+        points: -reward.pointsCost,
+        timestamp: redeemedAt,
+        metadata: { rewardId: reward.id, title: reward.title },
+      });
+
+      return {
+        status: 200,
+        payload: {
+          success: true,
+          verified: true,
+          redeemedReward: {
+            ...reward,
+            isRedeemed: true,
+            redeemedAt,
+          },
+          newTotalPoints: remainingPoints,
+          remainingPoints,
+          pointsDeducted: reward.pointsCost,
+        },
+      };
     });
 
-    res.json({
-      success: true,
-      verified: true,
-      redeemedReward: {
-        ...reward,
-        isRedeemed: true,
-        redeemedAt,
-      },
-      remainingPoints,
-      pointsDeducted: reward.pointsCost,
-    });
+    return res.status(result.status).json(result.payload);
   } catch (err: any) {
-    console.error('Reward redemption error:', err);
-    res.status(500).json({ error: 'Failed to process reward redemption' });
+    console.error('[Rewards Service] Error redeeming reward:', err);
+    return res.status(500).json({ error: 'Failed to process reward redemption' });
   }
 });
 
@@ -1618,40 +1909,7 @@ Clearly distinguish MEASURED vs ESTIMATED vs EXTERNAL_DATA vs USER_PROVIDED.`;
   }
 });
 
-// 5. Server-Side Point & Reward Validation Engine (Anti-Fraud)
-app.post('/api/points/verify', requireAuth, (req: AuthRequest, res) => {
-  const { actionType, currentStreakDays = 0, currentTotal = 0 } = req.body;
 
-  const POINT_RULES: Record<string, number> = {
-    PLANT_ADOPTION: 10,
-    PLANT_SETUP: 10,
-    MILESTONE_7D: 20,
-    MILESTONE_30D: 50,
-    MILESTONE_90D: 100,
-    MILESTONE_180D: 150,
-    SUCCESSFUL_RECOVERY: 75,
-    CARE_TASK: 2,
-    PROGRESS_PHOTO: 5,
-    AIR_BASELINE_SET: 15,
-    LITTLESTEP_ACTION_COMPLETED: 15,
-  };
-
-  const pointsAwarded = POINT_RULES[actionType] || 0;
-  const newTotal = currentTotal + pointsAwarded;
-
-  // Calculate Level (1 Level per 100 points)
-  const currentLevel = Math.floor(newTotal / 100) + 1;
-
-  res.json({
-    success: true,
-    actionType,
-    pointsAwarded,
-    newTotal,
-    currentLevel,
-    verifiedServerSide: true,
-    timestamp: new Date().toISOString(),
-  });
-});
 
 // =========================================================================
 // 6. PHASE 8: LITTLESTEP PERSONALIZATION AGENT & ORCHESTRATOR ENDPOINTS

@@ -135,88 +135,108 @@ export const AirEnvironmentView: React.FC = () => {
       </div>
 
       {/* Baseline Overview Grid */}
-      <div className="bg-emerald-950/70 rounded-2xl p-6 border border-emerald-800/60 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-800/40 pb-4">
-          <div>
+      {!baseline ? (
+        <div className="bg-emerald-950/70 rounded-2xl p-6 border border-emerald-800/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="space-y-1">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Activity className="w-5 h-5 text-emerald-400" />
-              <span>Baseline Environmental Profile</span>
+              <span>Environmental Baseline Not Established</span>
             </h2>
             <p className="text-xs text-emerald-300/80">
-              Location: {baseline.locationName} • Established on {new Date(baseline.establishedAt).toLocaleDateString()}
+              In Cloud mode, initial AQI and humidity baselines are established through user calibration or verified local station telemetry.
             </p>
           </div>
-          <span className="text-xs px-3 py-1 rounded-full bg-emerald-800 text-emerald-200 font-mono">
-            Status: Established & Verified
-          </span>
+          <button
+            onClick={() => setIsCalibrateOpen(true)}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0"
+          >
+            Establish Environmental Baseline
+          </button>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Outdoor AQI */}
-          <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                <CloudSun className="w-3.5 h-3.5 text-amber-400" />
-                <span>Outdoor AQI</span>
-              </span>
-              {renderSourceBadge(baseline.outdoorAqi.sourceType)}
-            </div>
+      ) : (
+        <div className="bg-emerald-950/70 rounded-2xl p-6 border border-emerald-800/60 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-800/40 pb-4">
             <div>
-              <div className="text-2xl font-bold text-white">{baseline.outdoorAqi.value}</div>
-              <span className="text-[11px] text-emerald-300/70">{baseline.outdoorAqi.unit} (Moderate)</span>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Activity className="w-5 h-5 text-emerald-400" />
+                <span>Baseline Environmental Profile</span>
+              </h2>
+              <p className="text-xs text-emerald-300/80">
+                Location: {baseline.locationName} • Established on {new Date(baseline.establishedAt).toLocaleDateString()}
+              </p>
             </div>
-            <p className="text-[10px] text-emerald-400/60">{baseline.outdoorAqi.sourceLabel}</p>
+            <span className="text-xs px-3 py-1 rounded-full bg-emerald-800 text-emerald-200 font-mono">
+              Status: Established & Verified
+            </span>
           </div>
 
-          {/* Outdoor PM2.5 */}
-          <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                <Wind className="w-3.5 h-3.5 text-blue-400" />
-                <span>Outdoor PM2.5</span>
-              </span>
-              {renderSourceBadge(baseline.outdoorPm25.sourceType)}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Outdoor AQI */}
+            <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                  <CloudSun className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Outdoor AQI</span>
+                </span>
+                {renderSourceBadge(baseline.outdoorAqi.sourceType)}
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-white">{baseline.outdoorAqi.value}</div>
+                <span className="text-[11px] text-emerald-300/70">{baseline.outdoorAqi.unit} (Moderate)</span>
+              </div>
+              <p className="text-[10px] text-emerald-400/60">{baseline.outdoorAqi.sourceLabel}</p>
             </div>
-            <div>
-              <div className="text-2xl font-bold text-white">{baseline.outdoorPm25.value}</div>
-              <span className="text-[11px] text-emerald-300/70">{baseline.outdoorPm25.unit}</span>
-            </div>
-            <p className="text-[10px] text-emerald-400/60">{baseline.outdoorPm25.sourceLabel}</p>
-          </div>
 
-          {/* Indoor Humidity */}
-          <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                <Droplets className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Indoor Humidity</span>
-              </span>
-              {renderSourceBadge(baseline.indoorHumidity.sourceType)}
+            {/* Outdoor PM2.5 */}
+            <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                  <Wind className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Outdoor PM2.5</span>
+                </span>
+                {renderSourceBadge(baseline.outdoorPm25.sourceType)}
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-white">{baseline.outdoorPm25.value}</div>
+                <span className="text-[11px] text-emerald-300/70">{baseline.outdoorPm25.unit}</span>
+              </div>
+              <p className="text-[10px] text-emerald-400/60">{baseline.outdoorPm25.sourceLabel}</p>
             </div>
-            <div>
-              <div className="text-2xl font-bold text-white">{baseline.indoorHumidity.value}%</div>
-              <span className="text-[11px] text-emerald-300/70">Relative Humidity</span>
-            </div>
-            <p className="text-[10px] text-emerald-400/60">{baseline.indoorHumidity.sourceLabel}</p>
-          </div>
 
-          {/* Indoor Temperature */}
-          <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                <Thermometer className="w-3.5 h-3.5 text-rose-400" />
-                <span>Indoor Temperature</span>
-              </span>
-              {renderSourceBadge(baseline.indoorTemp.sourceType)}
+            {/* Indoor Humidity */}
+            <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                  <Droplets className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Indoor Humidity</span>
+                </span>
+                {renderSourceBadge(baseline.indoorHumidity.sourceType)}
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-white">{baseline.indoorHumidity.value}%</div>
+                <span className="text-[11px] text-emerald-300/70">Relative Humidity</span>
+              </div>
+              <p className="text-[10px] text-emerald-400/60">{baseline.indoorHumidity.sourceLabel}</p>
             </div>
-            <div>
-              <div className="text-2xl font-bold text-white">{baseline.indoorTemp.value}°C</div>
-              <span className="text-[11px] text-emerald-300/70">Ambient Thermal Scale</span>
+
+            {/* Indoor Temperature */}
+            <div className="p-4 rounded-xl bg-emerald-900/40 border border-emerald-800/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                  <Thermometer className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Indoor Temperature</span>
+                </span>
+                {renderSourceBadge(baseline.indoorTemp.sourceType)}
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-white">{baseline.indoorTemp.value}°C</div>
+                <span className="text-[11px] text-emerald-300/70">Ambient Thermal Scale</span>
+              </div>
+              <p className="text-[10px] text-emerald-400/60">{baseline.indoorTemp.sourceLabel}</p>
             </div>
-            <p className="text-[10px] text-emerald-400/60">{baseline.indoorTemp.sourceLabel}</p>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Longitudinal Timeline: Before vs. After Plant Milestones */}
       <div className="bg-emerald-950/70 rounded-2xl p-6 border border-emerald-800/60 space-y-6">

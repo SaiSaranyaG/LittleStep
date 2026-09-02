@@ -51,6 +51,7 @@ import {
   savePlantPreferencesToCloud,
   loadPlantPreferencesFromCloud,
 } from '../services/dataService';
+import { uploadImageToStorage } from '../services/storageService';
 import { trackAnalyticsEvent } from '../services/analyticsService';
 
 
@@ -113,7 +114,7 @@ interface AppContextType {
   refreshRecommendation: () => Promise<void>;
 
   // Air Environment Tracking
-  baseline: AirQualityBaseline;
+  baseline: AirQualityBaseline | null;
   airTimeline: AirTimelineEntry[];
   updateBaseline: (updated: Partial<AirQualityBaseline>) => Promise<void>;
   addAirLogEntry: (
@@ -404,13 +405,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [isAnalyzingHealth, setIsAnalyzingHealth] = useState(false);
 
-  // Air Baseline & Timeline
-  const [baseline, setBaseline] = useState<AirQualityBaseline>(() => {
+  // Air Baseline & Timeline (BUG-14: baseline = null in cloud mode until established)
+  const [baseline, setBaseline] = useState<AirQualityBaseline | null>(() => {
     if (CURRENT_DATA_MODE === 'mock') {
       const saved = localStorage.getItem(STORAGE_KEYS.BASELINE);
       return saved ? JSON.parse(saved) : INITIAL_BASELINE;
     }
-    return EMPTY_BASELINE;
+    return null;
   });
   const [airTimeline, setAirTimeline] = useState<AirTimelineEntry[]>(() => {
     if (CURRENT_DATA_MODE === 'mock') {
@@ -534,7 +535,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActivePlant(null);
         setCareTasks([]);
         setDiagnostics([]);
-        setBaseline(EMPTY_BASELINE);
+        setBaseline(null);
         setAirTimeline([]);
         setTotalPoints(0);
         setTransactions([]);
@@ -667,24 +668,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const awardPoints = async (
     actionType: PointTransaction['actionType'],
     description: string,
-    adoptionId?: string
+    adoptionId?: string,
+    customActionId?: string
   ) => {
     try {
       const headers = await getAuthHeaders();
+      const uniqueActionId = customActionId || `${actionType}_${adoptionId || 'act'}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const res = await fetch('/api/points/verify', {
         method: 'POST',
         headers,
         body: JSON.stringify({
           actionType,
-          currentTotal: totalPoints,
-          currentStreakDays: longestStreak,
+          actionId: uniqueActionId,
+          description,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setTotalPoints(data.newTotal);
         const newTx: PointTransaction = {
-          id: `tx-${Date.now()}`,
+          id: data.actionId || uniqueActionId,
           actionType,
           description,
           points: data.pointsAwarded,
@@ -716,27 +719,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             colors: ['#10b981', '#34d399', '#059669', '#f59e0b'],
           });
         }
+      } else {
+        console.warn('Server point verification notice:', data.error || data.message);
       }
-    } catch {
-      // Fallback
-      const fallbackPoints = 5;
-      setTotalPoints((prev) => prev + fallbackPoints);
-      const fallbackTx: PointTransaction = {
-        id: `tx-${Date.now()}`,
-        actionType,
-        description,
-        points: fallbackPoints,
-        timestamp: new Date().toISOString(),
-        adoptionId,
-        verifiedServerSide: false,
-      };
-      setTransactions((prev) => [fallbackTx, ...prev]);
-
-      if (user?.uid) {
-        savePointTransactionToCloud(user.uid, fallbackTx).catch((err) =>
-          console.warn('Point transaction fallback cloud sync failed:', err)
-        );
-      }
+    } catch (err) {
+      console.warn('Points award network error:', err);
     }
   };
 
@@ -766,8 +753,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await res.json();
       const result = data?.data || {};
 
+      const spaceId = `space-${Date.now()}`;
+      let cloudPhotoUrl = imageBase64;
+
+      if (user?.uid) {
+        try {
+          const uploadRes = await uploadImageToStorage(imageBase64, 'spaces', spaceId, user.uid);
+          if (uploadRes?.url) {
+            cloudPhotoUrl = uploadRes.url;
+          }
+        } catch (uploadErr) {
+          console.warn('[Space Scan] Cloud Storage upload notice:', uploadErr);
+        }
+      }
+
       const newSpace: SpaceProfile = {
-        id: `space-${Date.now()}`,
+        id: spaceId,
         name: `Scanned ${spaceType.charAt(0).toUpperCase() + spaceType.slice(1)}`,
         spaceType: result.space_type || spaceType,
         lengthFt: result.estimated_length_ft || 7.5,
@@ -778,7 +779,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         requiresConfirmation: result.requires_user_confirmation ?? true,
         plantCapacityEstimate: result.plant_capacity_estimate || 6,
         currentUtilizationPct: 0,
-        photoUrl: imageBase64,
+        photoUrl: cloudPhotoUrl,
         safetyWarnings: result.safety_warnings || [],
         referenceBenchmark: referenceBenchmark || result.confirmation_prompt,
         lastScannedAt: new Date().toISOString(),
@@ -971,21 +972,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshRecommendation(prefs);
   };
 
-  // Analytics Event Tracker
-  const trackAnalyticsEvent = async (eventName: string, properties: Record<string, unknown> = {}) => {
+  // Canonical Analytics Event Tracker (BUG-10 Fix)
+  const trackAnalyticsEvent = async (
+    eventType: string,
+    metadata: Record<string, unknown> = {},
+    entityId?: string,
+    entityType?: string
+  ) => {
     try {
+      const canonicalEvent = {
+        eventId: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        eventType,
+        userId: user?.uid || 'anonymous',
+        timestamp: new Date().toISOString(),
+        entityId: entityId || (metadata.spaceId as string) || (metadata.adoptionId as string) || (metadata.taskId as string) || (metadata.rewardId as string),
+        entityType: entityType || (metadata.spaceId ? 'space' : metadata.adoptionId ? 'plant' : metadata.taskId ? 'care_task' : metadata.rewardId ? 'reward' : undefined),
+        metadata: {
+          ...metadata,
+          activeSpaceId: activeSpace?.id,
+          totalPoints,
+          activePlantsCount: adoptions.length,
+        },
+        environment: import.meta.env.MODE || 'development',
+      };
+
       await fetch('/api/analytics/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventName,
-          properties: {
-            ...properties,
-            spaceId: activeSpace?.id,
-            totalPoints,
-            activePlantsCount: adoptions.length,
-          },
-        }),
+        body: JSON.stringify(canonicalEvent),
       });
     } catch {
       // Non-blocking telemetry
@@ -1106,14 +1120,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setupNotes?: string
   ) => {
     const timestamp = new Date().toISOString();
+    let persistentPhotoUrl = setupPhotoBase64;
+
+    if (setupPhotoBase64 && user?.uid) {
+      try {
+        const uploadRes = await uploadImageToStorage(setupPhotoBase64, 'plants', adoptionId, user.uid);
+        if (uploadRes?.url) {
+          persistentPhotoUrl = uploadRes.url;
+        }
+      } catch (uploadErr) {
+        console.warn('[Plant Setup] Cloud Storage upload notice:', uploadErr);
+      }
+    }
+
     setAdoptions((prev) =>
       prev.map((a) => {
         if (a.id === adoptionId) {
-          const updatedPhotos = setupPhotoBase64
+          const updatedPhotos = persistentPhotoUrl
             ? [
                 {
                   id: `photo-setup-${Date.now()}`,
-                  url: setupPhotoBase64,
+                  url: persistentPhotoUrl,
                   timestamp,
                   caption: `Physical setup confirmed in ${activeSpace?.name || 'Space'}`,
                   type: 'setup' as const,
@@ -1126,7 +1153,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...a,
             status: 'SETUP_COMPLETED',
             setupConfirmedAt: timestamp,
-            setupPhotoUrl: setupPhotoBase64 || a.photos[0]?.url,
+            setupPhotoUrl: persistentPhotoUrl || a.photos[0]?.url,
             notes: setupNotes ? `${a.notes ? a.notes + ' ' : ''}${setupNotes}` : a.notes,
             photos: updatedPhotos,
           };
@@ -1292,11 +1319,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await res.json();
       const result = data?.data || {};
 
+      const diagId = `diag-${Date.now()}`;
+      let persistentDiagPhotoUrl = imageBase64;
+
+      if (user?.uid) {
+        try {
+          const uploadRes = await uploadImageToStorage(imageBase64, 'diagnostics', diagId, user.uid);
+          if (uploadRes?.url) {
+            persistentDiagPhotoUrl = uploadRes.url;
+          }
+        } catch (uploadErr) {
+          console.warn('[Health Check] Cloud Storage upload notice:', uploadErr);
+        }
+      }
+
       const diagnostic: HealthDiagnostic = {
-        id: `diag-${Date.now()}`,
+        id: diagId,
         adoptionId,
         timestamp: new Date().toISOString(),
-        photoUrl: imageBase64,
+        photoUrl: persistentDiagPhotoUrl,
         healthStatus: result.healthStatus || 'watch',
         confidenceScore: result.confidenceScore || 0.85,
         confidenceLevel: result.confidenceLevel || 'medium',
@@ -1761,10 +1802,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Reward Redemption Flow
+  // Reward Redemption Flow (Server-Authoritative & Atomic)
   const redeemReward = async (rewardId: string): Promise<boolean> => {
     const reward = rewards.find((r) => r.id === rewardId);
-    if (!reward || totalPoints < reward.pointsCost) return false;
+    if (!reward) return false;
 
     try {
       const headers = await getAuthHeaders();
@@ -1773,13 +1814,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers,
         body: JSON.stringify({
           rewardId: reward.id,
-          pointsCost: reward.pointsCost,
-          currentTotalPoints: totalPoints,
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        console.error('Reward redemption server rejection:', data.error);
+        console.warn('Reward redemption server rejection:', data.error || data.message);
         return false;
       }
 

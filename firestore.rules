@@ -11,56 +11,23 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // User profile and subcollections: strictly private to the user
+    // Authoritative User Data Schema: /users/{userId} and all subcollections
+    // Strictly enforces user data isolation (BUG-18):
+    // - Anonymous (unauthenticated) access -> DENIED
+    // - User A reading/modifying/deleting User B data -> DENIED
+    // - User B reading/modifying/deleting User A data -> DENIED
+    // - Authenticated User accessing own data -> ALLOWED
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      match /{subcollection}/{document=**} {
+      match /{subcollection}/{docId} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    // Domain collections with strict user-ownership validation
-    match /spaces/{spaceId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /adoptions/{adoptionId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /care_tasks/{taskId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /health_observations/{observationId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /reward_transactions/{transactionId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /air_baselines/{baselineId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /agent_logs/{logId} {
-      allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+    // Deny access to any unlisted root collections or paths
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

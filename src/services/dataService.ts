@@ -23,9 +23,10 @@ import {
   UserPlantPreferences,
 } from '../types';
 
-export type DataMode = 'mock' | 'cloud' | 'local';
+export type DataMode = 'mock' | 'cloud';
 
-export const CURRENT_DATA_MODE: DataMode = (import.meta.env.VITE_DATA_MODE as DataMode) || 'cloud';
+export const CURRENT_DATA_MODE: DataMode =
+  (import.meta.env.VITE_DATA_MODE as DataMode) === 'mock' ? 'mock' : 'cloud';
 
 /**
  * LittleStep Data Repository Layer

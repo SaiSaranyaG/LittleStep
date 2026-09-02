@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Authoritative User Isolated Path: users/{userId}/*
+    // Enforces strict multi-tenant storage isolation:
+    // - Unauthenticated (anonymous) access -> DENIED
+    // - User A reading or modifying User B storage objects -> DENIED
+    // - User B reading or modifying User A storage objects -> DENIED
+    // - Authenticated owner reading or writing own storage objects -> ALLOWED
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Explicitly deny access to any unlisted root paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

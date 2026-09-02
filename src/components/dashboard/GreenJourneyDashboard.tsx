@@ -111,7 +111,7 @@ export const GreenJourneyDashboard: React.FC = () => {
       description:
         'Check real outdoor AQI versus indoor humidity levels. Learn how humidity and plant care interact naturally in your home.',
       statusLabel: 'Air Quality Snapshot',
-      statusValue: `Outdoor AQI: ${baseline.outdoorAqi.value} (${baseline.outdoorAqi.category}) • Humidity: ${baseline.indoorHumidity.value}%`,
+      statusValue: baseline ? `Outdoor AQI: ${baseline.outdoorAqi.value} (${baseline.outdoorAqi.category}) • Humidity: ${baseline.indoorHumidity.value}%` : 'Baseline not yet established',
       actionText: 'Explore Air & Climate',
       buttonId: 'dashboard-open-environment-btn',
     },

@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserProfile } from '../types';
+import { deleteUserStorageFiles } from '../services/storageService';
 
 export type AuthStatus = 'AUTH_LOADING' | 'AUTHENTICATED' | 'NOT_AUTHENTICATED';
 
@@ -158,26 +159,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     : 'NOT_AUTHENTICATED';
   const isAuthenticated = Boolean(user);
 
-  // Restore phone authentication session on startup if present
+  // Restore phone authentication session on startup if present and valid
   useEffect(() => {
     const savedUserStr = localStorage.getItem('littlestep_phone_user');
     const savedToken = localStorage.getItem('littlestep_phone_token');
-    if (savedUserStr && !auth.currentUser) {
+    if (savedUserStr && savedToken && !auth.currentUser) {
       try {
         const savedUser = JSON.parse(savedUserStr);
         if (savedUser && savedUser.uid) {
-          setUser({
-            uid: savedUser.uid,
-            phoneNumber: savedUser.phoneNumber,
-            displayName: savedUser.displayName,
-            email: null,
-            emailVerified: false,
-            getIdToken: async () => savedToken || '',
-          } as any);
-          setUserProfile(savedUser);
+          const parts = savedToken.split('.');
+          if (parts.length === 3) {
+            let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            while (base64.length % 4) base64 += '=';
+            const payload = JSON.parse(atob(base64));
+            const nowSec = Math.floor(Date.now() / 1000);
+            if (payload && payload.exp && payload.exp > nowSec) {
+              setUser({
+                uid: savedUser.uid,
+                phoneNumber: savedUser.phoneNumber,
+                displayName: savedUser.displayName,
+                email: null,
+                emailVerified: false,
+                getIdToken: async () => savedToken,
+              } as any);
+              setUserProfile(savedUser);
+              return;
+            }
+          }
         }
+        // Token expired or invalid format, clear cached keys
+        localStorage.removeItem('littlestep_phone_user');
+        localStorage.removeItem('littlestep_phone_token');
       } catch (e) {
         console.warn('Error loading cached phone session:', e);
+        localStorage.removeItem('littlestep_phone_user');
+        localStorage.removeItem('littlestep_phone_token');
       }
     }
   }, []);
@@ -644,77 +660,101 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     closeAuthGate();
   };
 
-  // Account Deletion
+  // Account Deletion (BUG-05)
   const deleteAccount = async (): Promise<boolean> => {
-    if (!user) return false;
+    if (!user || !user.uid) {
+      setAuthError('No active user session to delete.');
+      return false;
+    }
+    const uid = user.uid;
+
     try {
-      const uid = user.uid;
+      // 1. Delete all user subcollections under /users/{uid}/
+      const subcollections = [
+        'spaces',
+        'adoptions',
+        'care_tasks',
+        'diagnostics',
+        'air_baselines',
+        'points_transactions',
+        'reward_redemptions',
+        'preferences',
+      ];
 
-      // Clean up all Firestore documents owned by this user
-      try {
-        const batch = writeBatch(db);
-        const collectionsToClean = [
-          'spaces',
-          'adoptions',
-          'care_tasks',
-          'health_observations',
-          'reward_transactions',
-          'air_baselines',
-          'agent_logs',
-        ];
-
-        for (const colName of collectionsToClean) {
-          const q = query(collection(db, colName), where('userId', '==', uid));
-          const snap = await getDocs(q);
-          snap.forEach((d) => batch.delete(d.ref));
-        }
-
-        // Subcollection cleanup under users/{uid}
-        const subcollections = [
-          'spaces',
-          'adoptions',
-          'care_tasks',
-          'diagnostics',
-          'air_baselines',
-          'points_transactions',
-          'reward_redemptions',
-          'preferences',
-        ];
-        for (const subcol of subcollections) {
-          try {
-            const subDocs = await getDocs(collection(db, 'users', uid, subcol));
+      for (const subcol of subcollections) {
+        try {
+          const subDocs = await getDocs(collection(db, 'users', uid, subcol));
+          if (!subDocs.empty) {
+            const batch = writeBatch(db);
             subDocs.forEach((d) => batch.delete(d.ref));
-          } catch (subErr) {
-            // subcollection might not exist, proceed
+            await batch.commit();
           }
+        } catch (subErr: any) {
+          console.error(`[Account Deletion] Failed to delete subcollection '${subcol}':`, subErr);
+          throw new Error(`Failed to delete user ${subcol} records: ${subErr?.message || subErr}`);
         }
-
-        // Delete root user profile doc
-        batch.delete(doc(db, 'users', uid));
-        await batch.commit();
-      } catch (cleanupErr) {
-        console.warn('Firestore user cascade cleanup warning:', cleanupErr);
       }
 
-      // Clear local storage keys
+      // 2. Delete root user profile doc /users/{uid}
+      try {
+        await deleteDoc(doc(db, 'users', uid));
+      } catch (profileErr: any) {
+        console.error('[Account Deletion] Failed to delete root user document:', profileErr);
+        throw new Error(`Failed to delete root user profile: ${profileErr?.message || profileErr}`);
+      }
+
+      // 3. Clean up user storage files in Firebase Storage under users/{uid}/*
+      try {
+        await deleteUserStorageFiles(uid);
+      } catch (storageErr) {
+        console.warn('[Account Deletion] Storage file cleanup notice:', storageErr);
+      }
+
+      // 3. Clear all local storage keys only after successful Firestore deletion
       try {
         localStorage.removeItem('littlestep_phone_user');
         localStorage.removeItem('littlestep_phone_token');
         localStorage.removeItem('littlestep_sustainability_prefs');
         localStorage.removeItem('littlestep_plant_prefs');
         localStorage.removeItem('littlestep_active_space_id');
+        localStorage.removeItem('littlestep_spaces_v1');
+        localStorage.removeItem('littlestep_adoptions_v1');
+        localStorage.removeItem('littlestep_tasks_v1');
+        localStorage.removeItem('littlestep_diagnostics_v1');
+        localStorage.removeItem('littlestep_baseline_v1');
+        localStorage.removeItem('littlestep_timeline_v1');
+        localStorage.removeItem('littlestep_points_v1');
+        localStorage.removeItem('littlestep_transactions_v1');
+        localStorage.removeItem('littlestep_rewards_v1');
+        localStorage.removeItem('littlestep_logs_v1');
+        localStorage.removeItem('littlestep_preferences_v1');
+        localStorage.removeItem('littlestep_sust_prefs_v1');
+        localStorage.removeItem('littlestep_next_step_v1');
+        localStorage.removeItem('littlestep_chat_v1');
       } catch (e) {
-        // ignore storage errors
+        // ignore storage clear errors
       }
 
-      // Delete Firebase Auth User
-      await deleteUser(user);
+      // 4. Delete Firebase Auth User
+      if (auth.currentUser) {
+        try {
+          await deleteUser(auth.currentUser);
+        } catch (authDeleteErr: any) {
+          console.warn('[Account Deletion] Firebase Auth user deletion notice:', authDeleteErr);
+        }
+      }
+
+      // 5. Reset authentication & context states
       setUser(null);
       setUserProfile(null);
       setPendingAction(null);
+      closeAuthModal();
+      closeAuthGate();
       return true;
     } catch (err: any) {
-      setAuthError(getFriendlyAuthErrorMessage(err.code || ''));
+      console.error('[AuthContext] Account deletion error:', err);
+      const errorMsg = err?.message || 'Failed to complete account deletion. Please try again.';
+      setAuthError(errorMsg);
       return false;
     }
   };
