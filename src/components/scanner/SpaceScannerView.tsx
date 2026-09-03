@@ -35,6 +35,7 @@ export const SpaceScannerView: React.FC = () => {
   const { user, openAuthGate } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [selectedSpaceType, setSelectedSpaceType] = useState<'balcony' | 'indoor_room' | 'patio' | 'terrace'>(
     'balcony'
   );
@@ -251,21 +252,40 @@ export const SpaceScannerView: React.FC = () => {
 
               <input
                 type="file"
+                ref={cameraInputRef}
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+              <input
+                type="file"
                 ref={fileInputRef}
                 accept="image/*"
                 className="hidden"
                 onChange={handleFileUpload}
               />
 
-              <button
-                id="upload-space-photo-btn"
-                disabled={isScanningSpace}
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-emerald-950 font-semibold text-sm shadow-md transition-all disabled:opacity-50"
-              >
-                <Upload className="w-4 h-4" />
-                <span>Upload New Space Photo</span>
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  id="take-camera-photo-btn"
+                  disabled={isScanningSpace}
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-emerald-950 font-bold text-xs shadow-md transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  <Camera className="w-4 h-4 shrink-0" />
+                  <span>Take Photo (Camera)</span>
+                </button>
+                <button
+                  id="upload-space-photo-btn"
+                  disabled={isScanningSpace}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-xl bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-700/60 text-emerald-100 font-bold text-xs shadow-md transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  <Upload className="w-4 h-4 shrink-0" />
+                  <span>Upload (Gallery)</span>
+                </button>
+              </div>
             </div>
 
             {/* Quick Demo Scenarios */}

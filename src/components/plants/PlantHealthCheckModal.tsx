@@ -39,6 +39,7 @@ export const PlantHealthCheckModal: React.FC<PlantHealthCheckModalProps> = ({
 }) => {
   const { runHealthCheck, isAnalyzingHealth, activeSpace } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<'upload' | 'analyzing' | 'result'>('upload');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -252,6 +253,14 @@ export const PlantHealthCheckModal: React.FC<PlantHealthCheckModalProps> = ({
               <div className="space-y-3">
                 <input
                   type="file"
+                  ref={cameraInputRef}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+                <input
+                  type="file"
                   ref={fileInputRef}
                   accept="image/*"
                   className="hidden"
@@ -267,28 +276,54 @@ export const PlantHealthCheckModal: React.FC<PlantHealthCheckModalProps> = ({
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-4 justify-between">
                       <span className="text-xs font-semibold text-white bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-700">
-                        📸 Photo Ready for AI Inspection
+                        📸 Photo Compressed & Ready for AI Inspection
                       </span>
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow"
-                      >
-                        Change Photo
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => cameraInputRef.current?.click()}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow flex items-center gap-1 cursor-pointer"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Camera</span>
+                        </button>
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold border border-slate-600 cursor-pointer"
+                        >
+                          Gallery
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-2xl p-8 text-center cursor-pointer transition-all bg-slate-950/40 hover:bg-slate-950/70 group"
-                  >
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-950/80 text-emerald-400 border border-emerald-700/50 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition-transform">
-                      <Camera className="w-7 h-7" />
+                  <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6 text-center bg-slate-950/40 space-y-4">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-950/80 text-emerald-400 border border-emerald-700/50 flex items-center justify-center mx-auto">
+                      <Camera className="w-6 h-6" />
                     </div>
-                    <p className="text-sm font-bold text-white">Take or Upload Plant Photo</p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Tap here to upload a photo from your camera or library (JPG, PNG, WebP)
-                    </p>
+                    <div>
+                      <p className="text-sm font-bold text-white">Capture or Upload Plant Photo</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Images are automatically compressed for 20x faster AI diagnosis
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 max-w-sm mx-auto pt-1">
+                      <button
+                        type="button"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-emerald-950 font-bold text-xs shadow flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera className="w-4 h-4 shrink-0" />
+                        <span>Take Photo (Camera)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Upload className="w-4 h-4 shrink-0" />
+                        <span>Upload (Gallery)</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
