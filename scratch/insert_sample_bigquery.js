@@ -2,7 +2,7 @@ const http = require('http');
 
 /**
  * BigQuery Sample Telemetry Data Ingestion Script
- * Dataset: littlestep_analytics | Table: telemetry_events
+ * Dataset: littlestep_analytics | Table: analytics_events
  */
 
 const sampleTelemetryEvents = [

@@ -278,7 +278,7 @@ app.get('/api/health', async (req, res) => {
   const firestoreDb = process.env.FIRESTORE_DATABASE || 'ai-studio-littlestep-0db8fc65-cf8d-4e42-a288-13a2828c5f75';
   const gcsBucket = process.env.GCS_BUCKET_NAME || 'gen-lang-client-0222003829.firebasestorage.app';
   const bigqueryDataset = process.env.BIGQUERY_DATASET || 'littlestep_analytics';
-  const bigqueryTable = process.env.BIGQUERY_TABLE || 'telemetry_events';
+  const bigqueryTable = process.env.BIGQUERY_TABLE || 'analytics_events';
 
   // 1. Verify Gemini AI Service Configuration
   let geminiStatus = 'disconnected';
@@ -630,7 +630,7 @@ app.post('/api/analytics/events', async (req, res) => {
 
     const gcpProjectId = process.env.GCP_PROJECT_ID || 'gen-lang-client-0222003829';
     const bigqueryDataset = process.env.BIGQUERY_DATASET || 'littlestep_analytics';
-    const bigqueryTable = process.env.BIGQUERY_TABLE || 'telemetry_events';
+    const bigqueryTable = process.env.BIGQUERY_TABLE || 'analytics_events';
 
     // BigQuery Streaming Ingestion
     if (gcpProjectId && bigqueryDataset) {
